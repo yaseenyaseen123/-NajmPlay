@@ -1,0 +1,271 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  ADMIN
+  USER
+}
+
+enum SubscriptionStatus {
+  TRIAL
+  ACTIVE
+  EXPIRED
+  CANCELLED
+  PAYMENT_FAILED
+}
+
+enum ContentType {
+  MOVIE
+  SERIES
+  LIVE_CHANNEL
+}
+
+enum PaymentStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  REFUNDED
+}
+
+model User {
+  id            String         @id @default(cuid())
+  email         String         @unique
+  passwordHash  String
+  name          String?
+  phone         String?
+  role          UserRole       @default(USER)
+  isActive      Boolean        @default(true)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  
+  subscriptions Subscription[]
+  devices       Device[]
+  payments      Payment[]
+  auditLogs     AuditLog[]
+  
+  @@index([email])
+  @@map("users")
+}
+
+model Plan {
+  id               String         @id @default(cuid())
+  name             String
+  nameAr           String
+  description      String?
+  descriptionAr    String?
+  price            Float
+  currency         String         @default("USD")
+  durationDays     Int
+  maxDevices       Int            @default(1)
+  hasTrialPeriod   Boolean        @default(true)
+  trialDurationDays Int           @default(1)
+  paypalPlanId     String?        @unique
+  isActive         Boolean        @default(true)
+  features         String[]       // JSON array of features
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  
+  subscriptions    Subscription[]
+  
+  @@map("plans")
+}
+
+model Subscription {
+  id                  String              @id @default(cuid())
+  userId              String
+  planId              String
+  status              SubscriptionStatus  @default(TRIAL)
+  paypalSubscriptionId String?           @unique
+  startDate           DateTime            @default(now())
+  endDate             DateTime?
+  trialEndDate        DateTime?
+  isTrial             Boolean             @default(true)
+  autoRenew           Boolean             @default(true)
+  cancelledAt         DateTime?
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
+  
+  user                User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plan                Plan                @relation(fields: [planId], references: [id])
+  payments            Payment[]
+  
+  @@index([userId])
+  @@index([status])
+  @@index([paypalSubscriptionId])
+  @@map("subscriptions")
+}
+
+model Content {
+  id               String      @id @default(cuid())
+  title            String
+  titleAr          String
+  description      String?
+  descriptionAr    String?
+  type             ContentType
+  genre            String[]
+  releaseYear      Int?
+  rating           Float?
+  duration         Int?        // in minutes
+  thumbnailUrl     String?
+  posterUrl        String?
+  trailerUrl       String?
+  videoUrl         String?     // for movies
+  isActive         Boolean     @default(true)
+  isFeatured       Boolean     @default(false)
+  viewCount        Int         @default(0)
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+  
+  series           Series?
+  
+  @@index([type])
+  @@index([isActive])
+  @@map("content")
+}
+
+model Series {
+  id               String      @id @default(cuid())
+  contentId        String      @unique
+  totalSeasons     Int         @default(0)
+  totalEpisodes    Int         @default(0)
+  
+  content          Content     @relation(fields: [contentId], references: [id], onDelete: Cascade)
+  seasons          Season[]
+  
+  @@map("series")
+}
+
+model Season {
+  id               String      @id @default(cuid())
+  seriesId         String
+  seasonNumber     Int
+  title            String?
+  titleAr          String?
+  description      String?
+  descriptionAr    String?
+  posterUrl        String?
+  releaseYear      Int?
+  
+  series           Series      @relation(fields: [seriesId], references: [id], onDelete: Cascade)
+  episodes         Episode[]
+  
+  @@unique([seriesId, seasonNumber])
+  @@index([seriesId])
+  @@map("seasons")
+}
+
+model Episode {
+  id               String      @id @default(cuid())
+  seasonId         String
+  episodeNumber    Int
+  title            String
+  titleAr          String
+  description      String?
+  descriptionAr    String?
+  duration         Int?        // in minutes
+  thumbnailUrl     String?
+  videoUrl         String
+  airDate          DateTime?
+  viewCount        Int         @default(0)
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+  
+  season           Season      @relation(fields: [seasonId], references: [id], onDelete: Cascade)
+  
+  @@unique([seasonId, episodeNumber])
+  @@index([seasonId])
+  @@map("episodes")
+}
+
+model Channel {
+  id               String      @id @default(cuid())
+  name             String
+  nameAr           String
+  description      String?
+  descriptionAr    String?
+  category         String      // e.g., "sports", "news", "entertainment"
+  logoUrl          String?
+  ingestUrl        String      // RTMP ingest URL
+  streamUrl        String      // HLS/DASH playback URL
+  isLive           Boolean     @default(true)
+  isActive         Boolean     @default(true)
+  viewCount        Int         @default(0)
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+  
+  @@index([category])
+  @@index([isActive])
+  @@map("channels")
+}
+
+model Device {
+  id               String      @id @default(cuid())
+  userId           String
+  deviceId         String      @unique
+  deviceName       String?
+  deviceType       String?     // e.g., "mobile", "tablet", "tv", "web"
+  ipAddress        String?
+  userAgent        String?
+  lastActiveAt     DateTime    @default(now())
+  isActive         Boolean     @default(true)
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+  
+  user             User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@index([userId])
+  @@index([deviceId])
+  @@map("devices")
+}
+
+model Payment {
+  id                  String        @id @default(cuid())
+  userId              String
+  subscriptionId      String?
+  paypalPaymentId     String?       @unique
+  paypalOrderId       String?
+  amount              Float
+  currency            String        @default("USD")
+  status              PaymentStatus @default(PENDING)
+  paymentMethod       String        @default("paypal")
+  description         String?
+  metadata            String?       // JSON string for additional data
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+  
+  user                User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subscription        Subscription? @relation(fields: [subscriptionId], references: [id])
+  
+  @@index([userId])
+  @@index([status])
+  @@index([paypalPaymentId])
+  @@map("payments")
+}
+
+model AuditLog {
+  id               String      @id @default(cuid())
+  userId           String?
+  action           String      // e.g., "LOGIN", "SUBSCRIPTION_CREATED", "PAYMENT_SUCCESS"
+  entity           String?     // e.g., "User", "Subscription", "Payment"
+  entityId         String?
+  details          String?     // JSON string
+  ipAddress        String?
+  userAgent        String?
+  createdAt        DateTime    @default(now())
+  
+  user             User?       @relation(fields: [userId], references: [id])
+  
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
